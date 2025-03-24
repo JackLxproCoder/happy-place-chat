@@ -9,8 +9,9 @@
 <body>
     <div class="container">
         <div class="chat-header">
-            <img src="happyplace.png" class="chat-pfp" alt="Group PFP">
+            <img src="https://via.placeholder.com/50" class="chat-pfp" alt="Group PFP">
             <h1 class="chat-title">Happy Place</h1>
+            <div id="userCount">0 users online</div>
         </div>
         
         <div class="chat-container" id="chatBox"></div>
@@ -26,6 +27,144 @@
 
     <button class="btn dark-mode-toggle" id="darkModeToggle">🌙</button>
 
-    <script src="script.js"></script>
+    <script>
+        const socket = new WebSocket('ws://localhost:3000');
+        let userName = localStorage.getItem('chatUsername') || prompt('Enter your name:');
+        localStorage.setItem('chatUsername', userName);
+        
+        socket.addEventListener('open', (event) => {
+            console.log('Connected to WebSocket server');
+            socket.send(JSON.stringify({
+                type: 'join',
+                user: userName,
+                timestamp: new Date().toISOString()
+            }));
+        
+            socket.send(JSON.stringify({
+                type: 'getHistory',
+                user: userName
+            }));
+        });
+    
+        socket.addEventListener('message', (event) => {
+            const message = JSON.parse(event.data);
+            
+            if (message.type === 'history') {
+                // Load chat history
+                message.data.forEach(msg => {
+                    displayMessage(msg);
+                });
+            } else if (message.type === 'userCount') {
+                document.getElementById('userCount').textContent = `${message.count} users online`;
+            } else {
+                displayMessage(message);
+            }
+        });
+        
+        function displayMessage(message) {
+            const chatBox = document.getElementById('chatBox');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message';
+            
+            const messageHeader = document.createElement('div');
+            messageHeader.className = 'message-header';
+            messageHeader.innerHTML = `
+                <span>${message.user}</span>
+                <span class="message-time">${new Date(message.timestamp).toLocaleString()}</span>
+            `;
+
+            messageDiv.appendChild(messageHeader);
+
+            if (message.type === 'text' || message.type === 'join') {
+                const messageContent = document.createElement('div');
+                messageContent.textContent = message.text || `${message.user} joined the chat`;
+                messageDiv.appendChild(messageContent);
+            } else if (message.type === 'file') {
+                const downloadLink = document.createElement('a');
+                downloadLink.href = message.fileUrl;
+                downloadLink.download = message.fileName || 'file';
+                downloadLink.className = 'download-link';
+                downloadLink.textContent = `📎 Download ${message.fileName || 'file'}`;
+                messageDiv.appendChild(downloadLink);
+            } else if (message.type === 'audio') {
+                const audioElement = document.createElement('audio');
+                audioElement.controls = true;
+                audioElement.src = message.fileUrl;
+                const downloadLink = document.createElement('a');
+                downloadLink.href = message.fileUrl;
+                downloadLink.download = `audio-${new Date(message.timestamp).getTime()}.webm`;
+                downloadLink.className = 'download-link';
+                downloadLink.textContent = '📥 Download Audio';
+                messageDiv.appendChild(audioElement);
+                messageDiv.appendChild(downloadLink);
+            }
+
+            chatBox.appendChild(messageDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+        
+        function sendMessage(text = null, content = null, type = 'text', fileName = null) {
+            const messageInput = document.getElementById('messageInput');
+            const messageText = text || messageInput.value;
+            if (!messageText && !content) return;
+            
+            const message = {
+                type: type,
+                user: userName,
+                text: messageText,
+                fileUrl: content,
+                fileName: fileName,
+                timestamp: new Date().toISOString()
+            };
+            
+            socket.send(JSON.stringify(message));
+            messageInput.value = '';
+        }
+    
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    sendMessage(null, e.target.result, 'file', file.name);
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+        
+        let isRecording = false;
+        document.getElementById('recordButton').addEventListener('click', () => {
+            if (!isRecording) {
+                isRecording = true;
+                document.getElementById('recordButton').textContent = '⏹';
+            } else {
+                isRecording = false;
+                document.getElementById('recordButton').textContent = '🎤';
+                // In real implementation, would send the audio blob here
+                sendMessage(null, 'audio-placeholder-url', 'audio');
+            }
+        });
+        
+        document.getElementById('messageInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+        
+        document.getElementById('darkModeToggle').addEventListener('click', () => {
+            document.body.classList.toggle('dark-mode');
+        });
+        
+        window.onload = () => {
+            const welcomeDiv = document.createElement('div');
+            welcomeDiv.className = 'message system-message';
+            welcomeDiv.innerHTML = `
+                <div class="message-header">
+                    <span>System</span>
+                    <span class="message-time">${new Date().toLocaleString()}</span>
+                </div>
+                <div>Welcome to Happy Place, ${userName}!</div>
+            `;
+            document.getElementById('chatBox').appendChild(welcomeDiv);
+        };
+    </script>
 </body>
 </html>
