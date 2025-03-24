@@ -4,93 +4,54 @@ let audioChunks = [];
 let userName = localStorage.getItem('chatUsername') || prompt('Enter your name:');
 localStorage.setItem('chatUsername', userName);
 
-const darkModeToggle = document.getElementById('darkModeToggle');
-const recordButton = document.getElementById('recordButton');
-const fileInput = document.getElementById('fileInput');
-const messageInput = document.getElementById('messageInput');
-const chatBox = document.getElementById('chatBox');
+const socket = io('http://localhost:3000');
 
-darkModeToggle.addEventListener('click', () => {
-    document.body.classList.toggle('light-mode');
-});
-
-recordButton.addEventListener('click', async () => {
-    if (!isRecording) {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            mediaRecorder = new MediaRecorder(stream);
-            mediaRecorder.start();
-            isRecording = true;
-            recordButton.textContent = '⏹';
-
-            mediaRecorder.ondataavailable = (e) => {
-                audioChunks.push(e.data);
-            };
-
-            mediaRecorder.onstop = () => {
-                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                const audioUrl = URL.createObjectURL(audioBlob);
-                sendMessage(null, audioUrl, 'audio');
-                audioChunks = [];
-                stream.getTracks().forEach(track => track.stop());
-            };
-        } catch (error) {
-            console.error('Error accessing microphone:', error);
-            alert('Could not access microphone. Please check permissions.');
-        }
-    } else {
-        mediaRecorder.stop();
-        isRecording = false;
-        recordButton.textContent = '🎤';
+async function loadChatHistory() {
+    try {
+        const response = await fetch('http://localhost:3000/api/messages');
+        const messages = await response.json();
+        
+        messages.forEach(message => {
+            displayMessage(message);
+        });
+        
+        chatBox.scrollTop = chatBox.scrollHeight;
+    } catch (error) {
+        console.error('Error loading chat history:', error);
     }
-});
+}
 
-fileInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (file) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            sendMessage(null, e.target.result, 'file', file.name);
-        };
-        reader.readAsDataURL(file);
-        fileInput.value = '';
-    }
-});
-
-function sendMessage(text = null, content = null, type = 'text') {
-    const messageText = text || messageInput.value;
-    if (!messageText && !content) return;
-
+function displayMessage(message) {
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message';
     
     const messageHeader = document.createElement('div');
     messageHeader.className = 'message-header';
     messageHeader.innerHTML = `
-        <span>${userName}</span>
-        <span class="message-time">${new Date().toLocaleString()}</span>
+        <span>${message.user}</span>
+        <span class="message-time">${new Date(message.timestamp).toLocaleString()}</span>
     `;
 
     messageDiv.appendChild(messageHeader);
 
-    if (type === 'text') {
+    if (message.type === 'text') {
         const messageContent = document.createElement('div');
-        messageContent.textContent = messageText;
+        messageContent.textContent = message.text;
         messageDiv.appendChild(messageContent);
-    } else if (type === 'file') {
+    } else if (message.type === 'file') {
         const downloadLink = document.createElement('a');
-        downloadLink.href = content;
-        downloadLink.download = content.name || 'file';
+        downloadLink.href = message.fileUrl;
+        downloadLink.download = message.fileName || 'file';
         downloadLink.className = 'download-link';
-        downloadLink.textContent = `📎 Download ${content.name || 'file'}`;
+        downloadLink.textContent = `📎 Download ${message.fileName || 'file'}`;
         messageDiv.appendChild(downloadLink);
-    } else if (type === 'audio') {
+    } else if (message.type === 'audio') {
         const audioElement = document.createElement('audio');
         audioElement.controls = true;
-        audioElement.src = content;
+        audioElement.src = message.fileUrl;
         const downloadLink = document.createElement('a');
-        downloadLink.href = content;
-        downloadLink.download = `audio-${Date.now()}.webm`;
+        downloadLink.href = message.fileUrl;
+        downloadLink.download = `audio-${new Date(message.timestamp).getTime()}.webm`;
         downloadLink.className = 'download-link';
         downloadLink.textContent = '📥 Download Audio';
         messageDiv.appendChild(audioElement);
@@ -98,23 +59,61 @@ function sendMessage(text = null, content = null, type = 'text') {
     }
 
     chatBox.appendChild(messageDiv);
-    messageInput.value = '';
     chatBox.scrollTop = chatBox.scrollHeight;
 }
 
-messageInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') sendMessage();
+async function sendMessage(text = null, content = null, type = 'text', fileName = null) {
+    const messageText = text || messageInput.value;
+    if (!messageText && !content) return;
+
+    const message = {
+        user: userName,
+        text: messageText,
+        type,
+        fileUrl: content,
+        fileName
+    };
+
+    if (type === 'audio' || type === 'file') {
+        socket.emit('sendMessage', message);
+    } else {
+        socket.emit('sendMessage', message);
+    }
+
+    messageInput.value = '';
+}
+
+socket.on('newMessage', (message) => {
+    displayMessage(message);
 });
 
+async function uploadFile(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    try {
+        const response = await fetch('http://localhost:3000/api/upload', {
+            method: 'POST',
+            body: formData
+        });
+        return await response.json();
+    } catch (error) {
+        console.error('Error uploading file:', error);
+        return null;
+    }
+}
+
 window.onload = () => {
+    loadChatHistory();
+    
     const welcomeDiv = document.createElement('div');
-    welcomeDiv.className = 'message';
+    welcomeDiv.className = 'message system-message';
     welcomeDiv.innerHTML = `
         <div class="message-header">
-            <span>System</span>
+            <span>Happy Place Bot</span>
             <span class="message-time">${new Date().toLocaleString()}</span>
         </div>
-        <div>Welcome to Happy Place, ${userName}!</div>
+        <div>Welcome to Happy Place, ${userName}! 🌻</div>
     `;
     chatBox.appendChild(welcomeDiv);
 };
